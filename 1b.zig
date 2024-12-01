@@ -121,7 +121,6 @@ pub fn main() !void {
         }
     }.cmp;
 
-    std.mem.sort(u32, parsed.a, {}, cmp);
     std.mem.sort(u32, parsed.b, {}, cmp);
 
     std.log.debug("parsed = {any}", .{parsed});

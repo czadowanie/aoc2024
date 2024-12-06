@@ -165,20 +165,20 @@ pub const Guard = struct {
                 .pos = self.pos,
                 .dir = turn(self.dir),
             };
+        } else {
+            std.debug.panic("unknown cell type", .{});
         }
-
-        unreachable;
     }
 };
 
 pub fn checkForLoop(map: Map, start: Guard, obstacle: Vec2) !bool {
+    var visited = std.AutoArrayHashMap(Guard, void).init(utils.tlarena.allocator());
+    defer visited.deinit();
+
     if (obstacle.x == start.pos.x and obstacle.y == start.pos.y) return false;
 
     var _map: Map = map;
     _map.additional_obstacle = obstacle;
-
-    var visited = std.AutoArrayHashMap(Guard, void).init(utils.alloc);
-    defer visited.deinit();
 
     try visited.put(start, {});
 
@@ -187,8 +187,6 @@ pub fn checkForLoop(map: Map, start: Guard, obstacle: Vec2) !bool {
         defer guard = new_guard;
 
         if (visited.contains(new_guard)) {
-            std.log.debug("--- LOOP FOUND ---", .{});
-
             return true;
         }
 
@@ -198,21 +196,51 @@ pub fn checkForLoop(map: Map, start: Guard, obstacle: Vec2) !bool {
     return false;
 }
 
+const LoopCheckCx = struct {
+    map: Map,
+    start: Guard,
+    obstacle: Vec2,
+    loops: *std.atomic.Value(usize),
+
+    pub fn run(self: LoopCheckCx) void {
+        const loop = checkForLoop(self.map, self.start, self.obstacle) catch |e|
+            std.debug.panic("checkForLoops returned {!}", .{e});
+
+        if (loop) {
+            _ = self.loops.fetchAdd(1, .acq_rel);
+        }
+    }
+};
+
 pub fn main() !void {
     const input = try utils.readInput();
     const map, const guard = try Map.parse(input);
 
-    var loops: usize = 0;
+    var loops = std.atomic.Value(usize).init(0);
+
+    var pool: std.Thread.Pool = undefined;
+    try pool.init(.{ .allocator = utils.alloc });
+    defer pool.deinit();
+
+    var wg = std.Thread.WaitGroup{};
+    wg.reset();
 
     var y: i32 = 0;
     while (y < map.height) : (y += 1) {
         var x: i32 = 0;
         while (x < map.width) : (x += 1) {
-            if (try checkForLoop(map, guard, vec2(x, y))) {
-                loops += 1;
-            }
+            const cx = LoopCheckCx{
+                .map = map,
+                .start = guard,
+                .obstacle = vec2(x, y),
+                .loops = &loops,
+            };
+
+            pool.spawnWg(&wg, LoopCheckCx.run, .{cx});
         }
     }
 
-    try std.io.getStdOut().writer().print("{d}\n", .{loops});
+    pool.waitAndWork(&wg);
+
+    try std.io.getStdOut().writer().print("{d}\n", .{loops.load(.acquire)});
 }

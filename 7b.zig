@@ -55,31 +55,44 @@ const Op = enum(u2) {
 };
 const n_ops = 3;
 
-fn genOpTreeImpl(history: *std.ArrayList(Op), ops: *std.ArrayList(Op), depth: usize, max_depth: usize) !void {
+fn genOpTreeImpl(history: *std.ArrayList(Op), ops: *std.ArrayListUnmanaged(Op), depth: usize, max_depth: usize) void {
     if (depth == max_depth) {
-        try ops.appendSlice(history.items);
+        ops.appendSliceAssumeCapacity(history.items);
     } else {
-        try history.append(Op.add);
-        try genOpTreeImpl(history, ops, depth + 1, max_depth);
+        history.appendAssumeCapacity(Op.add);
+        genOpTreeImpl(history, ops, depth + 1, max_depth);
 
-        try history.append(Op.mul);
-        try genOpTreeImpl(history, ops, depth + 1, max_depth);
+        history.appendAssumeCapacity(Op.mul);
+        genOpTreeImpl(history, ops, depth + 1, max_depth);
 
-        try history.append(Op.concat);
-        try genOpTreeImpl(history, ops, depth + 1, max_depth);
+        history.appendAssumeCapacity(Op.concat);
+        genOpTreeImpl(history, ops, depth + 1, max_depth);
     }
 
     _ = history.popOrNull();
 }
 
-fn genOpTree(max_depth: usize) ![]const Op {
-    var history = std.ArrayList(Op).init(utils.alloc);
-    var ops = try std.ArrayList(Op).initCapacity(utils.alloc, std.math.pow(u64, n_ops, max_depth) * max_depth);
+fn genOpTree(comptime max_depth: usize) [treeLen(max_depth)]Op {
+    @setEvalBranchQuota(1_000_000_000);
 
-    try genOpTreeImpl(&history, &ops, 0, max_depth);
+    var buf: [@sizeOf(Op) * max_depth]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    var history = std.ArrayList(Op).initCapacity(fba.allocator(), max_depth) catch unreachable;
 
-    return ops.items;
+    var out: [treeLen(max_depth)]Op = undefined;
+    var ops = std.ArrayListUnmanaged(Op).initBuffer(&out);
+
+    genOpTreeImpl(&history, &ops, 0, max_depth);
+
+    return out;
 }
+
+fn treeLen(depth: usize) usize {
+    return std.math.pow(u64, n_ops, depth) * depth;
+}
+
+const MAX_DEPTH: usize = 11;
+const tree: [treeLen(MAX_DEPTH)]Op = genOpTree(MAX_DEPTH);
 
 const OpTreeIter = struct {
     ops: []const Op,
@@ -136,11 +149,7 @@ pub fn main() !void {
     const input = try utils.readInput();
     var eq_iter = try EquationIter.init(utils.alloc, input);
 
-    const max_depth = 11;
-
     var sum = std.atomic.Value(u64).init(0);
-
-    const tree = try genOpTree(max_depth);
 
     var pool: std.Thread.Pool = undefined;
     try pool.init(.{
@@ -153,13 +162,12 @@ pub fn main() !void {
 
     const EqCx = struct {
         eq: Equation,
-        tree: []const Op,
         max_depth: usize,
         sum: *std.atomic.Value(u64),
 
         pub fn work(self: @This()) void {
             // std.log.debug("{any}", .{self.eq});
-            var ops_iter = OpTreeIter.init(self.tree, self.eq.terms.len - 1, self.max_depth) catch
+            var ops_iter = OpTreeIter.init(&tree, self.eq.terms.len - 1, self.max_depth) catch
                 @panic("Tree too shallow");
             while (ops_iter.next()) |ops| {
                 const res = eval(self.eq.terms, ops);
@@ -174,8 +182,7 @@ pub fn main() !void {
 
     while (eq_iter.next()) |eq| {
         pool.spawnWg(&wg, EqCx.work, .{EqCx{
-            .tree = tree,
-            .max_depth = max_depth,
+            .max_depth = MAX_DEPTH,
             .sum = &sum,
             .eq = Equation{
                 .result = eq.result,

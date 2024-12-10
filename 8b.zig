@@ -1,5 +1,6 @@
 const std = @import("std");
 const utils = @import("utils.zig");
+const log = std.log;
 
 pub const Vec2 = struct {
     x: i32,
@@ -48,7 +49,10 @@ pub const Map = struct {
         return true;
     }
 
-    pub fn parse(allocator: std.mem.Allocator, input: []const u8) !Map {
+    pub fn parse(
+        allocator: std.mem.Allocator,
+        input: []const u8,
+    ) !Map {
         var lines = std.mem.splitScalar(u8, input, '\n');
 
         const antennas = try allocator.create([max_antenna_freqs]std.ArrayList(Vec2));
@@ -104,14 +108,15 @@ const AntinodeIter = struct {
 };
 
 pub fn main() !void {
-    std.log.debug("max antenna freqs = {d}", .{max_antenna_freqs});
+    log.debug("max antenna freqs = {d}", .{max_antenna_freqs});
 
     const input = try utils.readInput();
     const map = try Map.parse(utils.alloc, input);
 
-    std.log.debug("size = {}", .{map.size});
+    log.debug("size = {}", .{map.size});
 
-    var antinodes = std.AutoArrayHashMap(Vec2, void).init(utils.alloc);
+    var antinodes =
+        std.AutoArrayHashMap(Vec2, void).init(utils.alloc);
 
     for (map.antennas) |antennas| {
         for (antennas.items) |a| {
@@ -131,5 +136,8 @@ pub fn main() !void {
         }
     }
 
-    try std.io.getStdOut().writer().print("{d}\n", .{antinodes.count()});
+    try std.io.getStdOut().writer().print(
+        "{d}\n",
+        .{antinodes.count()},
+    );
 }

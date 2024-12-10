@@ -37,7 +37,7 @@ const WordSearch = struct {
     pub fn new(input: []const u8) WordSearch {
         const height = utils.countLines(input);
 
-        var lines = std.mem.split(u8, input, "\n");
+        var lines = std.mem.splitScalar(u8, input, '\n');
         const first_line = lines.next().?;
         const width = first_line.len;
 
